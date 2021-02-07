@@ -1,4 +1,4 @@
-# dataflow-deployment
+# Dataflow-deployment
 Working Dataflow example deployment
 
 
@@ -69,4 +69,110 @@ Feb 06, 2021 4:47:17 PM org.apache.beam.runners.dataflow.DataflowRunner fromOpti
 INFO: PipelineOptions.filesToStage was not specified. Defaulting to files from the classpath: will stage 210 files. Enable logging at DEBUG level to see which files will be staged.
 Feb 06, 2021 4:47:19 PM org.apache.beam.runners.dataflow.DataflowRunner run
 INFO: Executing pipeline on the Dataflow Service, which will have billing implications related to Google Compute Engine usage and other Google Cloud Services.
+```
+
+
+
+Via terraform :
+
+Example terraform main.tf
+
+
+```
+provider "google" {
+  version = "~> 2.18.0"
+  region  = var.region
+}
+
+resource "random_id" "random_suffix" {
+  byte_length = 4
+}
+
+locals {
+  gcs_bucket_name = "tmp-dir-bucket-${random_id.random_suffix.hex}"
+}
+
+module "vpc" {
+  source       = "terraform-google-modules/network/google"
+  version      = "~> 1.0"
+  project_id   = var.project_id
+  network_name = "dataflow-network"
+
+  subnets = [
+    {
+      subnet_name   = "dataflow-subnetwork"
+      subnet_ip     = "10.1.3.0/24"
+      subnet_region = "europe-west2"
+    },
+  ]
+
+  secondary_ranges = {
+    dataflow-subnetwork = [
+      {
+        range_name    = "my-secondary-range"
+        ip_cidr_range = "192.168.64.0/24"
+      },
+    ]
+  }
+}
+
+module "dataflow-bucket" {
+  source        = "../../modules/dataflow_bucket"
+  name          = local.gcs_bucket_name
+  region        = var.region
+  project_id    = var.project_id
+  force_destroy = var.force_destroy
+}
+
+module "dataflow-job" {
+  source                = "../../"
+  project_id            = var.project_id
+  name                  = "wordcount-terraform-example-foo1"
+  on_delete             = "cancel"
+  region                = var.region
+  zone                  = var.zone
+  max_workers           = 1
+  template_gcs_path     = "gs://dataflow-templates/latest/Word_Count"
+  temp_gcs_location     = module.dataflow-bucket.name
+  service_account_email = var.service_account_email
+  network_self_link     = module.vpc.network_self_link
+  subnetwork_self_link  = module.vpc.subnets_self_links[0]
+  machine_type          = "n1-standard-1"
+
+  parameters = {
+
+    inputFile = "gs://test_template/shakespeare/kinglear.txt"
+    output    = "gs://${local.gcs_bucket_name}/output/my_output"
+
+  }
+}
+
+
+
+
+module "dataflow-job-2" {
+  source                = "../../"
+  project_id            = var.project_id
+  name                  = "wordcount-terraform-example-foo3"
+  on_delete             = "cancel"
+  region                = var.region
+  zone                  = var.zone
+  max_workers           = 1
+  template_gcs_path     = "gs://dataflow-templates/latest/Word_Count"
+  temp_gcs_location     = module.dataflow-bucket.name
+  service_account_email = var.service_account_email
+  network_self_link     = module.vpc.network_self_link
+  subnetwork_self_link  = module.vpc.subnets_self_links[0]
+  machine_type          = "n1-standard-2"
+
+  parameters = {
+    inputFile = "gs://test_template/shakespeare/kinglear.txt"
+    output    = "gs://${local.gcs_bucket_name}/output/my_output"
+
+
+  }
+}
+
+
+
 ```
